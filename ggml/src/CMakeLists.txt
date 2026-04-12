@@ -1338,6 +1338,17 @@ add_library(ggml
             ../include/ggml-backend.h
             ../../../../include/bitnet-lut-kernels.h
             ../../../../include/ggml-bitnet.h
+            ../../../../include/ggml-turboquant.h
+            ../../../../include/turboquant_codebooks.h
+            ../../../../include/turboquant_kv_layout.h
+            ggml-turboquant.c
+            ggml-turboquant-scalar.c
+            ggml-turboquant-avx.c
+            ggml-turboquant-qjl.c
+            ggml-turboquant-qjl.h
+            ggml-turboquant-neon32.c
+            ggml-turboquant-gpu-stub.c
+            ggml-turboquant-internal.h
             ggml.c
             ggml-alloc.c
             ggml-backend.cpp
@@ -1358,6 +1369,12 @@ add_library(ggml
             ${GGML_SOURCES_CANN}      ${GGML_HEADERS_CANN}
             ggml-aarch64.c            ggml-aarch64.h
             )
+
+if (CMAKE_SYSTEM_PROCESSOR MATCHES "x86_64|AMD64|amd64")
+    set_source_files_properties(
+        ${CMAKE_CURRENT_SOURCE_DIR}/ggml-turboquant-avx.c
+        PROPERTIES COMPILE_OPTIONS "-mavx2;-mfma")
+endif()
 
 if (EMSCRIPTEN)
     set_target_properties(ggml PROPERTIES COMPILE_FLAGS "-msimd128")

@@ -28,6 +28,10 @@
 
 #include "ggml-bitnet.h"
 
+#ifdef GGML_TURBOQUANT_KV
+#include "ggml-turboquant.h"
+#endif
+
 // TODO: replace with ggml API call
 #define QK_K 256
 
@@ -9814,6 +9818,11 @@ static struct ggml_tensor * llm_build_kqv(
     } else {
         struct ggml_tensor * kq = ggml_mul_mat(ctx, k, q);
         cb(kq, "kq", il);
+
+#ifdef GGML_TURBOQUANT_KV
+        /* TurboQuant KV: VAL init once per forward batch path (full packed-KV matmul TBD). */
+        ggml_turboquant_init();
+#endif
 
         if (model.arch == LLM_ARCH_PHI2 || model.arch == LLM_ARCH_PHI3 || model.arch == LLM_ARCH_GPTNEOX || model.arch == LLM_ARCH_QWEN2 || model.arch == LLM_ARCH_NEMOTRON || model.arch == LLM_ARCH_CHATGLM) {
             // for this arch, we need to perform the KQ multiplication with F32 precision, otherwise we get NaNs
