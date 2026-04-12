@@ -24118,6 +24118,22 @@ int ggml_cpu_has_ssse3(void) {
 #endif
 }
 
+int ggml_cpu_has_sse41(void) {
+#if defined(__SSE4_1__)
+    return 1;
+#else
+    return 0;
+#endif
+}
+
+int ggml_cpu_has_sse42(void) {
+#if defined(__SSE4_2__)
+    return 1;
+#else
+    return 0;
+#endif
+}
+
 int ggml_cpu_has_vsx(void) {
 #if defined(__POWER9_VECTOR__)
     return 1;

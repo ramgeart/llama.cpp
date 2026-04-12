@@ -22279,6 +22279,8 @@ const char * llama_print_system_info(void) {
     s += "BLAS = "        + std::to_string(ggml_cpu_has_blas())        + " | ";
     s += "SSE3 = "        + std::to_string(ggml_cpu_has_sse3())        + " | ";
     s += "SSSE3 = "       + std::to_string(ggml_cpu_has_ssse3())       + " | ";
+    s += "SSE4.1 = "     + std::to_string(ggml_cpu_has_sse41())       + " | ";
+    s += "SSE4.2 = "     + std::to_string(ggml_cpu_has_sse42())       + " | ";
     s += "VSX = "         + std::to_string(ggml_cpu_has_vsx())         + " | ";
     s += "MATMUL_INT8 = " + std::to_string(ggml_cpu_has_matmul_int8()) + " | ";
     s += "LLAMAFILE = "   + std::to_string(ggml_cpu_has_llamafile())   + " | ";

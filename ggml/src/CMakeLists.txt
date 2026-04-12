@@ -1342,6 +1342,8 @@ if (CMAKE_SYSTEM_PROCESSOR MATCHES "aarch64|ARM64|arm64|armv8|arm")
 endif()
 if (CMAKE_SYSTEM_PROCESSOR MATCHES "x86_64|AMD64|amd64|i686|i386|X86")
     list(APPEND GGML_BITNET_I2_SRC ../../../../src/ggml-bitnet-i2-avx2.cpp)
+    list(APPEND GGML_BITNET_I2_SRC ../../../../src/ggml-bitnet-i2-avx512.cpp)
+    list(APPEND GGML_BITNET_I2_SRC ../../../../src/ggml-bitnet-i2-sse41.cpp)
 endif()
 
 add_library(ggml
@@ -1356,6 +1358,8 @@ add_library(ggml
             ggml-turboquant.c
             ggml-turboquant-scalar.c
             ggml-turboquant-avx.c
+            ggml-turboquant-avx512.c
+            ggml-turboquant-sse.c
             ggml-turboquant-qjl.c
             ggml-turboquant-qjl.h
             ggml-turboquant-neon32.c
@@ -1390,8 +1394,20 @@ if (CMAKE_SYSTEM_PROCESSOR MATCHES "x86_64|AMD64|amd64")
         ${CMAKE_CURRENT_SOURCE_DIR}/ggml-turboquant-avx.c
         PROPERTIES COMPILE_OPTIONS "-mavx2;-mfma")
     set_source_files_properties(
+        ${CMAKE_CURRENT_SOURCE_DIR}/ggml-turboquant-avx512.c
+        PROPERTIES COMPILE_OPTIONS "-mavx512f;-mavx2;-mfma")
+    set_source_files_properties(
+        ${CMAKE_CURRENT_SOURCE_DIR}/ggml-turboquant-sse.c
+        PROPERTIES COMPILE_OPTIONS "-mssse3;-msse4.1")
+    set_source_files_properties(
         ${CMAKE_CURRENT_SOURCE_DIR}/../../../../src/ggml-bitnet-i2-avx2.cpp
         PROPERTIES COMPILE_OPTIONS "-mavx2;-mfma")
+    set_source_files_properties(
+        ${CMAKE_CURRENT_SOURCE_DIR}/../../../../src/ggml-bitnet-i2-avx512.cpp
+        PROPERTIES COMPILE_OPTIONS "-mavx512f;-mavx2;-mfma")
+    set_source_files_properties(
+        ${CMAKE_CURRENT_SOURCE_DIR}/../../../../src/ggml-bitnet-i2-sse41.cpp
+        PROPERTIES COMPILE_OPTIONS "-mssse3;-msse4.1")
 endif()
 
 if (EMSCRIPTEN)
