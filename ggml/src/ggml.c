@@ -10,9 +10,8 @@
 
 #if defined(_MSC_VER) || defined(__MINGW32__)
 #include <malloc.h> // using malloc.h with MSC/MINGW
-#elif !defined(__FreeBSD__) && !defined(__NetBSD__) && !defined(__OpenBSD__)
-#include <alloca.h>
 #endif
+#include "ggml-alloca.h"
 
 #include <assert.h>
 #include <errno.h>
@@ -22491,7 +22490,7 @@ enum ggml_opt_result ggml_opt(
 
     enum ggml_opt_result result = GGML_OPT_RESULT_OK;
 
-    struct ggml_opt_context * opt = (struct ggml_opt_context *) alloca(sizeof(struct ggml_opt_context));
+    struct ggml_opt_context * opt = (struct ggml_opt_context *) ggml_alloca(sizeof(struct ggml_opt_context));
 
     ggml_opt_init(ctx, opt, params, 0);
     result = ggml_opt_resume(ctx, opt, f);

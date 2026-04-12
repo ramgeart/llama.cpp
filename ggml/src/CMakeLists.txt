@@ -1332,6 +1332,18 @@ endif()
 
 # ggml
 
+# BitNet i2_s: scalar + dispatch; AVX2 and NEON in separate TUs (instruction-set-specific flags).
+set(GGML_BITNET_I2_SRC
+    ../../../../include/ggml-bitnet-i2.h
+    ../../../../src/ggml-bitnet-i2-scalar.c
+    ../../../../src/ggml-bitnet-i2-dispatch.cpp)
+if (CMAKE_SYSTEM_PROCESSOR MATCHES "aarch64|ARM64|arm64|armv8|arm")
+    list(APPEND GGML_BITNET_I2_SRC ../../../../src/ggml-bitnet-i2-neon.cpp)
+endif()
+if (CMAKE_SYSTEM_PROCESSOR MATCHES "x86_64|AMD64|amd64|i686|i386|X86")
+    list(APPEND GGML_BITNET_I2_SRC ../../../../src/ggml-bitnet-i2-avx2.cpp)
+endif()
+
 add_library(ggml
             ../include/ggml.h
             ../include/ggml-alloc.h
@@ -1349,6 +1361,7 @@ add_library(ggml
             ggml-turboquant-neon32.c
             ggml-turboquant-gpu-stub.c
             ggml-turboquant-internal.h
+            ggml-alloca.h
             ggml-turboquant-alloca.h
             ggml.c
             ggml-alloc.c
@@ -1356,6 +1369,7 @@ add_library(ggml
             ggml-quants.c
             ggml-quants.h
             ../../../../src/ggml-bitnet-mad.cpp
+            ${GGML_BITNET_I2_SRC}
             ../../../../src/ggml-bitnet-lut.cpp
             ${GGML_SOURCES_CUDA}      ${GGML_HEADERS_CUDA}
             ${GGML_SOURCES_METAL}     ${GGML_HEADERS_METAL}
@@ -1374,6 +1388,9 @@ add_library(ggml
 if (CMAKE_SYSTEM_PROCESSOR MATCHES "x86_64|AMD64|amd64")
     set_source_files_properties(
         ${CMAKE_CURRENT_SOURCE_DIR}/ggml-turboquant-avx.c
+        PROPERTIES COMPILE_OPTIONS "-mavx2;-mfma")
+    set_source_files_properties(
+        ${CMAKE_CURRENT_SOURCE_DIR}/../../../../src/ggml-bitnet-i2-avx2.cpp
         PROPERTIES COMPILE_OPTIONS "-mavx2;-mfma")
 endif()
 
