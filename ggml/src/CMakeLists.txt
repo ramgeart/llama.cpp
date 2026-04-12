@@ -1349,6 +1349,7 @@ add_library(ggml
             ggml-turboquant-neon32.c
             ggml-turboquant-gpu-stub.c
             ggml-turboquant-internal.h
+            ggml-turboquant-alloca.h
             ggml.c
             ggml-alloc.c
             ggml-backend.cpp

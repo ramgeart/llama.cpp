@@ -5,16 +5,12 @@
 
 #include "ggml-turboquant.h"
 #include "ggml-turboquant-internal.h"
+#include "ggml-turboquant-alloca.h"
 #include "turboquant_codebooks.h"
 
 #include <math.h>
 #include <string.h>
 #include <stdint.h>
-#if defined(_WIN32)
-#include <malloc.h>
-#else
-#include <alloca.h>
-#endif
 
 static uint64_t splitmix64(uint64_t * state) {
     uint64_t z = (*state += 0x9E3779B97F4A7C15ULL);
@@ -164,11 +160,11 @@ void ggml_turboquant_encode_mse_scalar(
         return;
     }
 
-    float * w = (float *)alloca((size_t)d * sizeof(float));
+    float * w = (float *)ggml_tq_alloca((size_t)d * sizeof(float));
     memcpy(w, x, (size_t)d * sizeof(float));
     ggml_turboquant_vec_normalize_l2(w, d);
 
-    int8_t * signs = (int8_t *)alloca((size_t)d);
+    int8_t * signs = (int8_t *)ggml_tq_alloca((size_t)d);
     rng_signs(seed, d, signs);
     for (int i = 0; i < d; i++) {
         w[i] *= (float)signs[i];
@@ -180,7 +176,7 @@ void ggml_turboquant_encode_mse_scalar(
         w[i] *= inv_sqrt_n;
     }
 
-    int * idx = (int *)alloca((size_t)d * sizeof(int));
+    int * idx = (int *)ggml_tq_alloca((size_t)d * sizeof(int));
     for (int j = 0; j < d; j++) {
         idx[j] = nearest_centroid(w[j], cent, nlev);
     }
@@ -200,10 +196,10 @@ void ggml_turboquant_decode_mse_scalar(
         return;
     }
 
-    int * idx = (int *)alloca((size_t)d * sizeof(int));
+    int * idx = (int *)ggml_tq_alloca((size_t)d * sizeof(int));
     unpack_indices(packed, d, b, idx);
 
-    float * w = (float *)alloca((size_t)d * sizeof(float));
+    float * w = (float *)ggml_tq_alloca((size_t)d * sizeof(float));
     for (int j = 0; j < d; j++) {
         w[j] = cent[idx[j]];
     }
@@ -214,7 +210,7 @@ void ggml_turboquant_decode_mse_scalar(
         w[i] *= inv_sqrt_n;
     }
 
-    int8_t * signs = (int8_t *)alloca((size_t)d);
+    int8_t * signs = (int8_t *)ggml_tq_alloca((size_t)d);
     rng_signs(seed, d, signs);
     for (int i = 0; i < d; i++) {
         out_x[i] = w[i] * (float)signs[i];
@@ -223,7 +219,7 @@ void ggml_turboquant_decode_mse_scalar(
 
 float ggml_turboquant_ip_f32_mse_scalar(
     const float * q, const uint8_t * packed, int d, int b, uint64_t seed) {
-    float * xh = (float *)alloca((size_t)d * sizeof(float));
+    float * xh = (float *)ggml_tq_alloca((size_t)d * sizeof(float));
     ggml_turboquant_decode_mse_scalar(packed, d, b, xh, seed);
     float s = 0.f;
     for (int i = 0; i < d; i++) {
