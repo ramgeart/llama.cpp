@@ -1,7 +1,5 @@
 /**
- * TurboQuant_prod / QJL (Stage B) — placeholder.
- * Default: disabled. Full dense-Gaussian S path is deferred; enable only after Stage A
- * validation and latency budget checks (50 ms/token abort policy).
+ * TurboQuant_prod / QJL (Stage B). When GGML_TURBOQUANT_ENABLE_QJL=0 (default), same IP as Stage A.
  */
 
 #include "ggml-turboquant-qjl.h"
@@ -9,11 +7,10 @@
 
 float ggml_turboquant_qjl_ip_f32(
     const float * q, const uint8_t * packed_mse, int d, int b, uint64_t seed) {
-    (void)q;
-    (void)packed_mse;
-    (void)d;
-    (void)b;
-    (void)seed;
-    /* Fallback: unbiased IP not available without QJL; return MSE-based IP for debugging */
+#if GGML_TURBOQUANT_ENABLE_QJL
+    /* TODO: unbiased TurboQuant_prod IP (dense S / QJL). Keep latency < 50 ms/token vs MSE baseline. */
     return ggml_turboquant_ip_f32_mse_scalar(q, packed_mse, d, b, seed);
+#else
+    return ggml_turboquant_ip_f32_mse_scalar(q, packed_mse, d, b, seed);
+#endif
 }

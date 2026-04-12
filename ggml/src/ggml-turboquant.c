@@ -1,5 +1,6 @@
 /**
- * VAL dispatcher — selects scalar vs x86 AVX2+FMA path (no intrinsics here).
+ * VAL dispatcher — selects scalar vs x86 AVX2+FMA vs (future) NEON / GPU.
+ * No hardware intrinsics in this file.
  */
 
 #include "ggml-turboquant.h"
@@ -25,16 +26,33 @@ void ggml_turboquant_init(void) {
         return;
     }
 #endif
-#if defined(__ARM_ARCH)
-    /* Reserved for ggml-turboquant-neon32 */
-    g_backend = 0;
+#if defined(__aarch64__) || defined(_M_ARM64) || defined(__ARM_NEON)
+    if (ggml_turboquant_neon32_available()) {
+        g_backend = 2;
+        return;
+    }
 #endif
+    if (ggml_turboquant_gpu_available()) {
+        g_backend = 3;
+        return;
+    }
     g_backend = 0;
 }
 
 int ggml_turboquant_backend_id(void) {
     ggml_turboquant_init();
     return g_backend;
+}
+
+void ggml_turboquant_vec_normalize_l2(float * x, int n) {
+    ggml_turboquant_init();
+#if defined(__x86_64__) || defined(_M_X64)
+    if (g_backend == 1) {
+        ggml_turboquant_vec_normalize_l2_avx(x, n);
+        return;
+    }
+#endif
+    ggml_turboquant_vec_normalize_l2_scalar(x, n);
 }
 
 void ggml_turboquant_encode_mse(
@@ -70,6 +88,11 @@ float ggml_turboquant_ip_f32_mse(
     }
 #endif
     return ggml_turboquant_ip_f32_mse_scalar(q, packed, d, b, seed);
+}
+
+float ggml_turboquant_kq_ip_mse(
+    const float * q_row, const uint8_t * k_packed_row, int head_dim, int base_bits, uint64_t row_seed) {
+    return ggml_turboquant_ip_f32_mse(q_row, k_packed_row, head_dim, base_bits, row_seed);
 }
 
 float ggml_turboquant_ip_f32_prod(

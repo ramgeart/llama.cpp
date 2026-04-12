@@ -27,7 +27,7 @@ static void rng_signs(uint64_t seed, int n, int8_t * signs) {
     }
 }
 
-void ggml_turboquant_vec_normalize_l2(float * x, int n) {
+void ggml_turboquant_vec_normalize_l2_scalar(float * x, int n) {
     double s = 0.0;
     for (int i = 0; i < n; i++) {
         s += (double)x[i] * (double)x[i];
@@ -162,7 +162,7 @@ void ggml_turboquant_encode_mse_scalar(
 
     float * w = (float *)ggml_tq_alloca((size_t)d * sizeof(float));
     memcpy(w, x, (size_t)d * sizeof(float));
-    ggml_turboquant_vec_normalize_l2(w, d);
+    ggml_turboquant_vec_normalize_l2_scalar(w, d);
 
     int8_t * signs = (int8_t *)ggml_tq_alloca((size_t)d);
     rng_signs(seed, d, signs);

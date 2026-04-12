@@ -4,6 +4,8 @@
 #include <stddef.h>
 #include <stdint.h>
 
+void ggml_turboquant_vec_normalize_l2_scalar(float * x, int n);
+
 void ggml_turboquant_encode_mse_scalar(
     const float * x, int d, int b, uint8_t * out, size_t packed_cap, uint64_t seed);
 
@@ -14,6 +16,8 @@ float ggml_turboquant_ip_f32_mse_scalar(
     const float * q, const uint8_t * packed, int d, int b, uint64_t seed);
 
 #if defined(__x86_64__) || defined(_M_X64)
+void ggml_turboquant_vec_normalize_l2_avx(float * x, int n);
+
 void ggml_turboquant_encode_mse_avx(
     const float * x, int d, int b, uint8_t * out, size_t packed_cap, uint64_t seed);
 
@@ -25,5 +29,8 @@ float ggml_turboquant_ip_f32_mse_avx(
 
 void ggml_turboquant_vec_scale_inplace_avx(float * x, int n, float scale);
 #endif
+
+int ggml_turboquant_neon32_available(void);
+int ggml_turboquant_gpu_available(void);
 
 #endif
