@@ -429,6 +429,14 @@ export class MCPService {
 		type: MCPTransportType;
 		stopPhaseLogging: () => void;
 	} {
+		if (config.transport === MCPTransportType.STDIO) {
+			return {
+				transport: new LlamaServerStdioTransport(serverName, config),
+				type: MCPTransportType.STDIO,
+				stopPhaseLogging: () => {}
+			};
+		}
+
 		if (!config.url) {
 			throw new Error('MCP server configuration is missing url');
 		}
@@ -468,14 +476,6 @@ export class MCPService {
 			return {
 				transport: new WebSocketClientTransport(url),
 				type: MCPTransportType.WEBSOCKET,
-				stopPhaseLogging: () => {}
-			};
-		}
-
-		if (config.transport === MCPTransportType.STDIO) {
-			return {
-				transport: new LlamaServerStdioTransport(serverName, config),
-				type: MCPTransportType.STDIO,
 				stopPhaseLogging: () => {}
 			};
 		}

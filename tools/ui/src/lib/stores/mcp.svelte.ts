@@ -181,7 +181,7 @@ class MCPStore {
 		entry: MCPServerSettingsEntry,
 		connectionTimeoutMs = DEFAULT_MCP_CONFIG.connectionTimeoutMs
 	): MCPServerConfig | undefined {
-		if (!entry?.url) {
+		if (!entry?.url && entry?.transport !== MCPTransportType.STDIO) {
 			return undefined;
 		}
 
