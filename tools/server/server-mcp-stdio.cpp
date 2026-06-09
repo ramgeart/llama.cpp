@@ -163,7 +163,16 @@ bool mcp_stdio_session::start(const mcp_stdio_config & config) {
     }
 
     hProcess = piProcInfo.hProcess;
-    if (hJob) AssignProcessToJobObject(hJob, hProcess);
+    if (hJob) {
+        if (!AssignProcessToJobObject(hJob, hProcess)) {
+            last_error = "AssignProcessToJobObject failed: " + std::to_string(GetLastError());
+            TerminateProcess(hProcess, 1);
+            CloseHandle(hProcess);
+            CloseHandle(piProcInfo.hThread);
+            hProcess = nullptr;
+            return false;
+        }
+    }
     ResumeThread(piProcInfo.hThread);
     CloseHandle(piProcInfo.hThread);
 
@@ -255,12 +264,18 @@ void mcp_stdio_session::terminate() {
         // Wait a bit for graceful exit
         int status;
         for (int i = 0; i < 5; ++i) {
-            if (waitpid(pid, &status, WNOHANG) != 0) {
+            int res = waitpid(pid, &status, WNOHANG);
+            if (res > 0) {
                 process_reaped = true;
                 if (WIFEXITED(status)) {
                     exit_code = WEXITSTATUS(status);
                 } else {
                     exit_code = 1;
+                }
+                break;
+            } else if (res == -1) {
+                if (errno == ECHILD) {
+                    process_reaped = true; // Already reaped by something else
                 }
                 break;
             }
@@ -285,10 +300,25 @@ bool mcp_stdio_session::write_stdin(const std::string & data) {
     if (!process_started || process_exited) return false;
     std::string line = data + "\n";
 #ifdef _WIN32
-    DWORD bytesWritten;
-    return WriteFile(hStdinWrite, line.c_str(), (DWORD)line.size(), &bytesWritten, NULL);
+    DWORD bytesWritten = 0;
+    if (WriteFile(hStdinWrite, line.c_str(), (DWORD)line.size(), &bytesWritten, NULL)) {
+        return bytesWritten == line.size();
+    }
+    return false;
 #else
-    return write(fd_stdin, line.c_str(), line.size()) == (ssize_t)line.size();
+    size_t total_written = 0;
+    while (total_written < line.size()) {
+        ssize_t res = write(fd_stdin, line.c_str() + total_written, line.size() - total_written);
+        if (res > 0) {
+            total_written += res;
+        } else if (res == -1) {
+            if (errno == EINTR) continue;
+            return false; // EPIPE or other errors
+        } else {
+            return false;
+        }
+    }
+    return true;
 #endif
 }
 
@@ -316,12 +346,15 @@ void mcp_stdio_session::capture_stdout() {
             std::string line = leftover.substr(0, pos);
             if (!line.empty() && line.back() == '\r') line.pop_back();
 
-            std::function<void(const std::string &)> local_on_stdout;
+            std::shared_ptr<ws_state> state;
             {
                 std::lock_guard<std::mutex> lock(callback_mutex);
-                local_on_stdout = on_stdout;
+                state = websocket_state;
             }
-            if (local_on_stdout) local_on_stdout(line);
+
+            if (state && state->is_alive) {
+                state->write_fn(state->ws, line);
+            }
 
             leftover.erase(0, pos + 1);
         }
@@ -331,21 +364,25 @@ void mcp_stdio_session::capture_stdout() {
 #ifndef _WIN32
     if (pid > 0 && !process_reaped.exchange(true)) {
         int status;
-        waitpid(pid, &status, 0);
-        if (WIFEXITED(status)) {
-            exit_code = WEXITSTATUS(status);
-        } else {
-            exit_code = 1;
+        int res = waitpid(pid, &status, 0);
+        if (res > 0) {
+            if (WIFEXITED(status)) {
+                exit_code = WEXITSTATUS(status);
+            } else {
+                exit_code = 1;
+            }
         }
     }
 #endif
 
-    std::function<void()> local_on_exit;
+    std::shared_ptr<ws_state> state;
     {
         std::lock_guard<std::mutex> lock(callback_mutex);
-        local_on_exit = on_exit;
+        state = websocket_state;
     }
-    if (local_on_exit) local_on_exit();
+    if (state && state->is_alive) {
+        state->close_fn(state->ws);
+    }
 }
 
 void mcp_stdio_session::capture_stderr() {
@@ -383,16 +420,16 @@ void mcp_stdio_session::capture_stderr() {
 
 json mcp_stdio_session::get_diagnostics() const {
     std::lock_guard<std::mutex> lock(stderr_mutex);
-    return {
-        {"session_id", session_id},
-        {"server_id", server_id},
-        {"process_started", (bool)process_started},
-        {"process_exited", (bool)process_exited},
-        {"exit_code", (bool)process_exited ? json(exit_code.load()) : json(nullptr)},
-        {"last_error", last_error.empty() ? json(nullptr) : json(last_error)},
-        {"stderr_tail", stderr_tail},
-        {"bytes_truncated", bytes_truncated}
-    };
+    json res;
+    res["session_id"] = session_id;
+    res["server_id"] = server_id;
+    res["process_started"] = (bool)process_started;
+    res["process_exited"] = (bool)process_exited;
+    res["exit_code"] = (bool)process_exited ? json(exit_code.load()) : json(nullptr);
+    res["last_error"] = last_error.empty() ? json(nullptr) : json(last_error);
+    res["stderr_tail"] = stderr_tail;
+    res["bytes_truncated"] = (bool)bytes_truncated;
+    return res;
 }
 
 mcp_stdio_manager::mcp_stdio_manager() {}
@@ -420,8 +457,18 @@ std::shared_ptr<mcp_stdio_session> mcp_stdio_manager::get_session(const std::str
 }
 
 void mcp_stdio_manager::delete_session(const std::string & session_id) {
-    std::lock_guard<std::mutex> lock(mutex);
-    sessions.erase(session_id);
+    std::shared_ptr<mcp_stdio_session> session;
+    {
+        std::lock_guard<std::mutex> lock(mutex);
+        auto it = sessions.find(session_id);
+        if (it != sessions.end()) {
+            session = it->second;
+            sessions.erase(it);
+        }
+    }
+    if (session) {
+        session->terminate();
+    }
 }
 
 json mcp_stdio_manager::get_all_sessions() {

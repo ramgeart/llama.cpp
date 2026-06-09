@@ -30,7 +30,7 @@ struct mcp_stdio_session {
 
     mutable std::mutex stderr_mutex;
     std::deque<std::string> stderr_tail;
-    bool bytes_truncated = false;
+    std::atomic<bool> bytes_truncated{false};
 
     mutable std::mutex callback_mutex;
 
@@ -50,8 +50,14 @@ struct mcp_stdio_session {
     std::thread stdout_thread;
     std::thread stderr_thread;
 
-    std::function<void(const std::string &)> on_stdout;
-    std::function<void()> on_exit;
+    struct ws_state {
+        void * ws = nullptr;
+        std::atomic<bool> is_alive{true};
+        std::function<void(void *, const std::string &)> write_fn;
+        std::function<void(void *)> close_fn;
+    };
+
+    std::shared_ptr<ws_state> websocket_state;
 
     mcp_stdio_session();
     ~mcp_stdio_session();

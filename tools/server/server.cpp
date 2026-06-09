@@ -291,15 +291,14 @@ int llama_server(int argc, char ** argv) {
             return;
         }
 
+        auto state = std::make_shared<mcp_stdio_session::ws_state>();
+        state->ws = ws;
+        state->write_fn = [&](void * w, const std::string & data) { ctx_http.ws_write(w, data); };
+        state->close_fn = [&](void * w) { ctx_http.ws_close(w); };
+
         {
             std::lock_guard<std::mutex> lock(session->callback_mutex);
-            session->on_stdout = [ws, &ctx_http](const std::string & line) {
-                ctx_http.ws_write(ws, line);
-            };
-
-            session->on_exit = [ws, &ctx_http]() {
-                ctx_http.ws_close(ws);
-            };
+            session->websocket_state = state;
         }
 
         auto * websocket = static_cast<httplib::ws::WebSocket *>(ws);
@@ -327,8 +326,10 @@ int llama_server(int argc, char ** argv) {
 
         {
             std::lock_guard<std::mutex> lock(session->callback_mutex);
-            session->on_stdout = nullptr;
-            session->on_exit = nullptr;
+            if (session->websocket_state) {
+                session->websocket_state->is_alive = false;
+                session->websocket_state = nullptr;
+            }
         }
 
         // Guarantee session is deleted when WebSocket handler exits
