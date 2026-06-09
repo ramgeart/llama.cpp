@@ -327,7 +327,7 @@ int llama_server(int argc, char ** argv) {
         {
             std::lock_guard<std::mutex> lock(session->callback_mutex);
             if (session->websocket_state) {
-                session->websocket_state->is_alive = false;
+                session->websocket_state->invalidate();
                 session->websocket_state = nullptr;
             }
         }

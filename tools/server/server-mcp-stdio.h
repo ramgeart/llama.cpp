@@ -9,6 +9,7 @@
 #include <thread>
 #include <atomic>
 #include <deque>
+#include <functional>
 
 struct mcp_stdio_config {
     std::string server_id;
@@ -51,10 +52,31 @@ struct mcp_stdio_session {
     std::thread stderr_thread;
 
     struct ws_state {
+        std::mutex mutex;
         void * ws = nullptr;
-        std::atomic<bool> is_alive{true};
+        bool is_alive = true;
         std::function<void(void *, const std::string &)> write_fn;
         std::function<void(void *)> close_fn;
+
+        void write(const std::string & data) {
+            std::lock_guard<std::mutex> lock(mutex);
+            if (is_alive && ws) {
+                write_fn(ws, data);
+            }
+        }
+
+        void close() {
+            std::lock_guard<std::mutex> lock(mutex);
+            if (is_alive && ws) {
+                close_fn(ws);
+            }
+        }
+
+        void invalidate() {
+            std::lock_guard<std::mutex> lock(mutex);
+            is_alive = false;
+            ws = nullptr;
+        }
     };
 
     std::shared_ptr<ws_state> websocket_state;

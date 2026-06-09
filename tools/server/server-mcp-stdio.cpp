@@ -352,8 +352,8 @@ void mcp_stdio_session::capture_stdout() {
                 state = websocket_state;
             }
 
-            if (state && state->is_alive) {
-                state->write_fn(state->ws, line);
+            if (state) {
+                state->write(line);
             }
 
             leftover.erase(0, pos + 1);
@@ -380,8 +380,8 @@ void mcp_stdio_session::capture_stdout() {
         std::lock_guard<std::mutex> lock(callback_mutex);
         state = websocket_state;
     }
-    if (state && state->is_alive) {
-        state->close_fn(state->ws);
+    if (state) {
+        state->close();
     }
 }
 
