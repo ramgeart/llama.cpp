@@ -3,6 +3,7 @@
 #include "server-models.h"
 #include "server-cors-proxy.h"
 #include "server-tools.h"
+#include "server-mcp-stdio.h"
 
 #include "arg.h"
 #include "build-info.h"
@@ -131,6 +132,7 @@ int llama_server(int argc, char ** argv) {
     // register API routes
     server_routes routes(params, ctx_server);
     server_tools tools;
+    mcp_stdio_manager mcp_stdio;
 
     std::optional<server_models_routes> models_routes{};
     if (is_router_server) {
@@ -217,6 +219,131 @@ int llama_server(int argc, char ** argv) {
     // Save & load slots
     ctx_http.get ("/slots",                    ex_wrapper(routes.get_slots));
     ctx_http.post("/slots/:id_slot",           ex_wrapper(routes.post_slots));
+
+    // MCP stdio
+    ctx_http.get("/mcp/stdio/enabled", [&](const server_http_req &) {
+        auto res = std::make_unique<server_http_res>();
+        res->data = safe_json_to_str({{"enabled", params.ui_mcp_stdio}});
+        return res;
+    });
+
+    ctx_http.post("/mcp/stdio/session", [&](const server_http_req & req) {
+        auto res = std::make_unique<server_http_res>();
+        if (!params.ui_mcp_stdio) {
+            res->status = 403;
+            res->data = safe_json_to_str({{"error", format_error_response("MCP stdio is disabled", ERROR_TYPE_PERMISSION)}});
+            return res;
+        }
+
+        json body = json::parse(req.body);
+        std::string server_id = json_value(body, "server_id", std::string());
+        if (server_id.empty()) {
+            res->status = 400;
+            res->data = safe_json_to_str({{"error", format_error_response("server_id is required", ERROR_TYPE_INVALID_REQUEST)}});
+            return res;
+        }
+
+        // validation: [a-zA-Z0-9_-], max 64, no path semantics
+        if (server_id.length() > 64 || server_id.find_first_not_of("abcdefghijklmnopqrstuvwxyzABCDEFGHIJKLMNOPQRSTUVWXYZ0123456789_-") != std::string::npos) {
+            res->status = 400;
+            res->data = safe_json_to_str({{"error", format_error_response("invalid server_id format", ERROR_TYPE_INVALID_REQUEST)}});
+            return res;
+        }
+
+        mcp_stdio_config config;
+        config.server_id = server_id;
+        config.command = json_value(body, "command", std::string());
+        config.args = json_value(body, "args", std::vector<std::string>());
+        config.cwd = json_value(body, "cwd", std::string());
+        config.env = json_value(body, "env", std::map<std::string, std::string>());
+
+        if (config.command.empty()) {
+            res->status = 400;
+            res->data = safe_json_to_str({{"error", format_error_response("command is required", ERROR_TYPE_INVALID_REQUEST)}});
+            return res;
+        }
+
+        auto session = mcp_stdio.create_session(config);
+        if (!session) {
+            res->status = 500;
+            res->data = safe_json_to_str({{"error", format_error_response("failed to create MCP session", ERROR_TYPE_SERVER)}});
+            return res;
+        }
+
+        res->data = safe_json_to_str(json {
+            {"session_id", session->session_id},
+            {"server_id", session->server_id},
+            {"ws_url", "/mcp/stdio/ws/" + session->session_id}
+        });
+        return res;
+    });
+
+    ctx_http.ws("/mcp/stdio/ws/:session_id", [&](const server_http_req & req, void * ws) {
+        std::string session_id = req.get_param("session_id");
+        auto session = mcp_stdio.get_session(session_id);
+        if (!session) {
+            ctx_http.ws_close(ws);
+            return;
+        }
+
+        session->on_stdout = [ws, &ctx_http](const std::string & line) {
+            ctx_http.ws_write(ws, line);
+        };
+
+        session->on_exit = [ws, &ctx_http]() {
+            ctx_http.ws_close(ws);
+        };
+
+        auto * websocket = static_cast<httplib::ws::WebSocket *>(ws);
+        // httplib::ws::WebSocket has no on_message in this version, we must read in a loop
+        std::thread reader_thread([websocket, session]() {
+            std::string msg;
+            while (websocket->is_open() && !session->process_exited) {
+                auto res = websocket->read(msg);
+                if (res == httplib::ws::ReadResult::Text || res == httplib::ws::ReadResult::Binary) {
+                    session->write_stdin(msg);
+                } else {
+                    break;
+                }
+            }
+        });
+
+        // Loop until closed
+        while (!req.should_stop() && !session->process_exited && websocket->is_open()) {
+            std::this_thread::sleep_for(std::chrono::milliseconds(100));
+        }
+
+        if (reader_thread.joinable()) {
+            reader_thread.join();
+        }
+    });
+
+    ctx_http.get("/mcp/stdio/sessions/:session_id/diagnostics", [&](const server_http_req & req) {
+        std::string session_id = req.get_param("session_id");
+        auto session = mcp_stdio.get_session(session_id);
+        auto res = std::make_unique<server_http_res>();
+        if (!session) {
+            res->status = 404;
+            res->data = safe_json_to_str({{"error", format_error_response("session not found", ERROR_TYPE_NOT_FOUND)}});
+            return res;
+        }
+        res->data = safe_json_to_str(session->get_diagnostics());
+        return res;
+    });
+
+    ctx_http.get("/mcp/stdio/sessions", [&](const server_http_req &) {
+        auto res = std::make_unique<server_http_res>();
+        res->data = safe_json_to_str(mcp_stdio.get_all_sessions());
+        return res;
+    });
+
+    ctx_http.del("/mcp/stdio/sessions/:session_id", [&](const server_http_req & req) {
+        std::string session_id = req.get_param("session_id");
+        mcp_stdio.delete_session(session_id);
+        auto res = std::make_unique<server_http_res>();
+        res->data = safe_json_to_str({{"success", true}});
+        return res;
+    });
 
     // Google Cloud Platform (Vertex AI) compat
     ctx_http.register_gcp_compat();

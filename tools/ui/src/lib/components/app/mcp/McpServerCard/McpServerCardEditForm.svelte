@@ -2,21 +2,39 @@
 	import { Button } from '$lib/components/ui/button';
 	import { McpServerForm } from '$lib/components/app/mcp';
 
+	import { MCPTransportType } from '$lib/enums';
+	import type { MCPServerSettingsEntry } from '$lib/types';
+
 	interface Props {
-		serverId: string;
-		serverUrl: string;
-		serverUseProxy?: boolean;
-		onSave: (url: string, headers: string, useProxy: boolean) => void;
+		server: MCPServerSettingsEntry;
+		onSave: (updates: Partial<MCPServerSettingsEntry>) => void;
 		onCancel: () => void;
 	}
 
-	let { serverId, serverUrl, serverUseProxy = false, onSave, onCancel }: Props = $props();
+	let { server, onSave, onCancel }: Props = $props();
 
-	let editUrl = $derived(serverUrl);
+	let editUrl = $state('');
 	let editHeaders = $state('');
-	let editUseProxy = $derived(serverUseProxy);
+	let editUseProxy = $state(false);
+	let editTransport = $state(MCPTransportType.STREAMABLE_HTTP);
+	let editCommand = $state('');
+	let editArgs = $state<string[]>([]);
+	let editCwd = $state('');
+	let editEnv = $state('');
+
+	$effect(() => {
+		editUrl = server.url ?? '';
+		editHeaders = server.headers ?? '';
+		editUseProxy = server.useProxy ?? false;
+		editTransport = server.transport ?? MCPTransportType.STREAMABLE_HTTP;
+		editCommand = server.command ?? '';
+		editArgs = server.args ?? [];
+		editCwd = server.cwd ?? '';
+		editEnv = server.env ?? '';
+	});
 
 	let urlError = $derived.by(() => {
+		if (editTransport === MCPTransportType.STDIO) return null;
 		if (!editUrl.trim()) return 'URL is required';
 		try {
 			new URL(editUrl);
@@ -26,17 +44,20 @@
 		}
 	});
 
-	let canSave = $derived(!urlError);
+	let canSave = $derived(!urlError && (editTransport !== MCPTransportType.STDIO || editCommand.trim()));
 
 	function handleSave() {
 		if (!canSave) return;
-		onSave(editUrl.trim(), editHeaders.trim(), editUseProxy);
-	}
-
-	export function setInitialValues(url: string, headers: string, useProxy: boolean) {
-		editUrl = url;
-		editHeaders = headers;
-		editUseProxy = useProxy;
+		onSave({
+			url: editUrl.trim(),
+			headers: editHeaders.trim(),
+			useProxy: editUseProxy,
+			transport: editTransport,
+			command: editCommand.trim(),
+			args: editArgs,
+			cwd: editCwd.trim(),
+			env: editEnv.trim()
+		});
 	}
 </script>
 
@@ -47,18 +68,28 @@
 		url={editUrl}
 		headers={editHeaders}
 		useProxy={editUseProxy}
+			transport={editTransport}
+			command={editCommand}
+			args={editArgs}
+			cwd={editCwd}
+			env={editEnv}
 		onUrlChange={(v) => (editUrl = v)}
 		onHeadersChange={(v) => (editHeaders = v)}
 		onUseProxyChange={(v) => (editUseProxy = v)}
+			onTransportChange={(v) => (editTransport = v)}
+			onCommandChange={(v) => (editCommand = v)}
+			onArgsChange={(v) => (editArgs = v)}
+			onCwdChange={(v) => (editCwd = v)}
+			onEnvChange={(v) => (editEnv = v)}
 		urlError={editUrl ? urlError : null}
-		id={serverId}
+		id={server.id}
 	/>
 
 	<div class="flex items-center justify-end gap-2">
 		<Button variant="secondary" size="sm" onclick={onCancel}>Cancel</Button>
 
 		<Button size="sm" onclick={handleSave} disabled={!canSave}>
-			{serverUrl.trim() ? 'Update' : 'Add'}
+			{server.url?.trim() || server.command?.trim() ? 'Update' : 'Add'}
 		</Button>
 	</div>
 </div>

@@ -93,9 +93,27 @@ class MCPStore {
 	private configSignature: string | null = null;
 	private initPromise: Promise<boolean> | null = null;
 	private activeFlowCount = 0;
+	private _isStdioEnabled = $state(false);
+
+	constructor() {
+		if (browser) {
+			this.checkStdioSupport();
+		}
+	}
+
+	private checkStdioSupport() {
+		fetch('/mcp/stdio/enabled')
+			.then((r) => r.json())
+			.then((d) => (this._isStdioEnabled = d.enabled))
+			.catch(() => (this._isStdioEnabled = false));
+	}
 
 	get isProxyAvailable(): boolean {
 		return serverStore.props?.cors_proxy_enabled ?? false;
+	}
+
+	get isStdioEnabled(): boolean {
+		return this._isStdioEnabled;
 	}
 
 	/**
@@ -178,13 +196,26 @@ class MCPStore {
 			}
 		}
 
+		let env: Record<string, string> | undefined;
+		if (entry.env) {
+			try {
+				env = JSON.parse(entry.env);
+			} catch {
+				console.warn('[MCP] Failed to parse env JSON:', entry.env);
+			}
+		}
+
 		return {
 			url: entry.url,
-			transport: detectMcpTransportFromUrl(entry.url),
+			transport: entry.transport ?? detectMcpTransportFromUrl(entry.url ?? ''),
 			handshakeTimeoutMs: connectionTimeoutMs,
 			requestTimeoutMs: Math.round(entry.requestTimeoutSeconds * 1000),
 			headers,
-			useProxy: entry.useProxy
+			useProxy: entry.useProxy,
+			command: entry.command,
+			args: entry.args,
+			cwd: entry.cwd,
+			env
 		};
 	}
 
@@ -580,6 +611,12 @@ class MCPStore {
 		if (!browser) {
 			return false;
 		}
+
+		// Check if stdio is enabled on backend
+		fetch('/mcp/stdio/enabled')
+			.then((r) => r.json())
+			.then((d) => (this._isStdioEnabled = d.enabled))
+			.catch(() => (this._isStdioEnabled = false));
 
 		const mcpConfig = this.#buildMcpClientConfig(config(), perChatOverrides);
 		const signature = mcpConfig ? JSON.stringify(mcpConfig) : null;

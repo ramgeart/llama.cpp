@@ -28,7 +28,8 @@ export enum MCPLogLevel {
 export enum MCPTransportType {
 	WEBSOCKET = 'websocket',
 	STREAMABLE_HTTP = 'streamable_http',
-	SSE = 'sse'
+	SSE = 'sse',
+	STDIO = 'stdio'
 }
 
 /**

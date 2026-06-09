@@ -11,6 +11,8 @@ add_library(${TARGET} STATIC
     server-task.h
     server-queue.cpp
     server-queue.h
+    server-mcp-stdio.cpp
+    server-mcp-stdio.h
     server-common.cpp
     server-common.h
     server-context.cpp
