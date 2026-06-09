@@ -56,38 +56,33 @@
 	let connectionTimeMs = $derived(successState?.connectionTimeMs);
 	let instructions = $derived(successState?.instructions);
 
-	let isEditing = $derived(!server.url.trim());
+	let isEditingInternal = $state(false);
+	let isEditing = $derived(!server.url?.trim() && !server.command?.trim() || isEditingInternal);
 	let showDeleteDialog = $state(false);
-	let editFormRef: McpServerCardEditForm | null = $state(null);
 
 	function handleHealthCheck() {
 		mcpStore.runHealthCheck(server);
 	}
 
 	async function startEditing() {
-		isEditing = true;
-		await tick();
-		editFormRef?.setInitialValues(server.url, server.headers || '', server.useProxy || false);
+		isEditingInternal = true;
 	}
 
 	function cancelEditing() {
-		if (server.url.trim()) {
-			isEditing = false;
+		if (server.url?.trim() || server.command?.trim()) {
+			isEditingInternal = false;
 		} else {
 			onDelete();
 		}
 	}
 
-	function saveEditing(url: string, headers: string, useProxy: boolean) {
-		onUpdate({
-			url: url,
-			headers: headers || undefined,
-			useProxy: useProxy
-		});
-		isEditing = false;
+	function saveEditing(updates: Partial<MCPServerSettingsEntry>) {
+		onUpdate(updates);
+		isEditingInternal = false;
 
-		if (server.enabled && url) {
-			setTimeout(() => mcpStore.runHealthCheck({ ...server, url, useProxy }), 100);
+		if (server.enabled) {
+			const updatedServer = { ...server, ...updates };
+			setTimeout(() => mcpStore.runHealthCheck(updatedServer), 100);
 		}
 	}
 
@@ -98,14 +93,7 @@
 
 <Card.Root class="!gap-3 bg-muted/30 p-4">
 	{#if isEditing}
-		<McpServerCardEditForm
-			bind:this={editFormRef}
-			serverId={server.id}
-			serverUrl={server.url}
-			serverUseProxy={server.useProxy}
-			onSave={saveEditing}
-			onCancel={cancelEditing}
-		/>
+		<McpServerCardEditForm {server} onSave={saveEditing} onCancel={cancelEditing} />
 	{:else}
 		<McpServerCardHeader
 			{displayName}

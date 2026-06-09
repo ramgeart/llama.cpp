@@ -629,6 +629,7 @@ struct common_params {
     std::string webui_config_json;
 
     bool ui_mcp_proxy = false;
+    bool ui_mcp_stdio = false;
     std::string ui_config_json;
 
     // "advanced" endpoints are disabled by default for better security

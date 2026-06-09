@@ -39,6 +39,7 @@ import type { MimeTypeUnion } from '$lib/types/common';
  * WebSocket URLs (ws:// or wss://) use 'websocket', others use 'streamable_http'.
  */
 export function detectMcpTransportFromUrl(url: string): MCPTransportType {
+	if (!url) return MCPTransportType.STREAMABLE_HTTP;
 	const normalized = url.trim().toLowerCase();
 
 	return normalized.startsWith(UrlProtocol.WEBSOCKET) ||
@@ -76,23 +77,28 @@ export function parseMcpServerSettings(rawServers: unknown): MCPServerSettingsEn
 	if (!Array.isArray(parsed)) return [];
 
 	return parsed.map((entry, index) => {
-		const url = typeof entry?.url === 'string' ? entry.url.trim() : '';
-		const headers = typeof entry?.headers === 'string' ? entry.headers.trim() : undefined;
+		const typedEntry = entry as Partial<MCPServerSettingsEntry>;
+		const url = typeof typedEntry.url === 'string' ? typedEntry.url.trim() : '';
+		const headers = typeof typedEntry.headers === 'string' ? typedEntry.headers.trim() : undefined;
 		const id =
-			typeof (entry as { id?: unknown })?.id === 'string' && (entry as { id?: string }).id?.trim()
-				? (entry as { id: string }).id.trim()
+			typeof typedEntry.id === 'string' && typedEntry.id?.trim()
+				? typedEntry.id.trim()
 				: `${MCP_SERVER_ID_PREFIX}-${index + 1}`;
 
 		return {
 			id,
-			enabled: Boolean((entry as { enabled?: unknown })?.enabled),
+			enabled: Boolean(typedEntry.enabled),
 			url,
-			name: (entry as { name?: string })?.name,
+			name: typedEntry.name,
 			requestTimeoutSeconds:
-				(entry as { requestTimeoutSeconds?: number })?.requestTimeoutSeconds ??
-				DEFAULT_MCP_CONFIG.requestTimeoutSeconds,
+				typedEntry.requestTimeoutSeconds ?? DEFAULT_MCP_CONFIG.requestTimeoutSeconds,
 			headers: headers || undefined,
-			useProxy: Boolean((entry as { useProxy?: unknown })?.useProxy)
+			useProxy: Boolean(typedEntry.useProxy),
+			transport: typedEntry.transport,
+			command: typedEntry.command,
+			args: typedEntry.args,
+			cwd: typedEntry.cwd,
+			env: typedEntry.env
 		} satisfies MCPServerSettingsEntry;
 	});
 }

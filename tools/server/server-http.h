@@ -86,6 +86,13 @@ struct server_http_context {
 
     void get(const std::string & path, const handler_t & handler) const;
     void post(const std::string & path, const handler_t & handler) const;
+    void del(const std::string & path, const handler_t & handler) const;
+
+    using ws_handler_t = std::function<void(const server_http_req & req, void * ws)>;
+    void ws(const std::string & path, const ws_handler_t & handler) const;
+
+    bool ws_write(void * ws, const std::string & data) const;
+    void ws_close(void * ws) const;
 
     // Register the Google Cloud Platform (Vertex AI) compat (AIP_PREDICT_ROUTE env var, or /predict)
     // Must be called AFTER all other API routes are registered

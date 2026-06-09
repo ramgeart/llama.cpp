@@ -30,7 +30,8 @@ import {
 	parseMcpServerSettings,
 	detectMcpTransportFromUrl,
 	uuid,
-	extractRootDomain
+	extractRootDomain,
+	getAuthHeaders
 } from '$lib/utils';
 import {
 	MCPConnectionPhase,
@@ -40,7 +41,8 @@ import {
 	ColorMode,
 	UrlProtocol,
 	JsonSchemaType,
-	ToolCallType
+	ToolCallType,
+	MCPTransportType
 } from '$lib/enums';
 import {
 	DEFAULT_CACHE_TTL_MS,
@@ -93,9 +95,27 @@ class MCPStore {
 	private configSignature: string | null = null;
 	private initPromise: Promise<boolean> | null = null;
 	private activeFlowCount = 0;
+	private _isStdioEnabled = $state(false);
+
+	constructor() {
+		if (browser) {
+			this.checkStdioSupport();
+		}
+	}
+
+	private checkStdioSupport() {
+		fetch('/mcp/stdio/enabled', { headers: getAuthHeaders() })
+			.then((r) => r.json())
+			.then((d) => (this._isStdioEnabled = d.enabled))
+			.catch(() => (this._isStdioEnabled = false));
+	}
 
 	get isProxyAvailable(): boolean {
 		return serverStore.props?.cors_proxy_enabled ?? false;
+	}
+
+	get isStdioEnabled(): boolean {
+		return this._isStdioEnabled;
 	}
 
 	/**
@@ -163,7 +183,7 @@ class MCPStore {
 		entry: MCPServerSettingsEntry,
 		connectionTimeoutMs = DEFAULT_MCP_CONFIG.connectionTimeoutMs
 	): MCPServerConfig | undefined {
-		if (!entry?.url) {
+		if (!entry?.url && entry?.transport !== MCPTransportType.STDIO) {
 			return undefined;
 		}
 
@@ -178,13 +198,29 @@ class MCPStore {
 			}
 		}
 
+		let env: Record<string, string> | undefined;
+		if (entry.env) {
+			try {
+				const parsed = JSON.parse(entry.env);
+				if (typeof parsed === 'object' && parsed !== null && !Array.isArray(parsed))
+					env = parsed as Record<string, string>;
+				else console.warn('[MCP] env must be a JSON object, ignoring:', entry.env);
+			} catch {
+				console.warn('[MCP] Failed to parse env JSON:', entry.env);
+			}
+		}
+
 		return {
 			url: entry.url,
-			transport: detectMcpTransportFromUrl(entry.url),
+			transport: entry.transport ?? detectMcpTransportFromUrl(entry.url ?? ''),
 			handshakeTimeoutMs: connectionTimeoutMs,
 			requestTimeoutMs: Math.round(entry.requestTimeoutSeconds * 1000),
 			headers,
-			useProxy: entry.useProxy
+			useProxy: entry.useProxy,
+			command: entry.command,
+			args: entry.args,
+			cwd: entry.cwd,
+			env
 		};
 	}
 
@@ -580,6 +616,12 @@ class MCPStore {
 		if (!browser) {
 			return false;
 		}
+
+		// Check if stdio is enabled on backend
+		fetch('/mcp/stdio/enabled', { headers: getAuthHeaders() })
+			.then((r) => r.json())
+			.then((d) => (this._isStdioEnabled = d.enabled))
+			.catch(() => (this._isStdioEnabled = false));
 
 		const mcpConfig = this.#buildMcpClientConfig(config(), perChatOverrides);
 		const signature = mcpConfig ? JSON.stringify(mcpConfig) : null;

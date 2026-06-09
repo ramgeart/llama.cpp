@@ -82,6 +82,76 @@ interface DiagnosticRequestDetails {
 	jsonRpcMethods?: string[];
 }
 
+class LlamaServerStdioTransport implements Transport {
+	private _ws?: WebSocket;
+	private _sessionId?: string;
+
+	onclose?: () => void;
+	onerror?: (error: Error) => void;
+	onmessage?: (message: any) => void;
+
+	constructor(private _serverId: string, private _config: MCPServerConfig) {}
+
+	async start(): Promise<void> {
+		const response = await fetch('/mcp/stdio/session', {
+			method: 'POST',
+			headers: { 'Content-Type': 'application/json', ...getAuthHeaders() },
+			body: JSON.stringify({
+				server_id: this._serverId,
+				command: this._config.command,
+				args: this._config.args,
+				cwd: this._config.cwd,
+				env: this._config.env
+			})
+		});
+
+		if (!response.ok) {
+			const error = await response.json();
+			throw new Error(error.error?.message || 'Failed to create stdio session');
+		}
+
+		const { session_id, ws_url } = await response.json();
+		this._sessionId = session_id;
+
+		return new Promise((resolve, reject) => {
+			const protocol = window.location.protocol === 'https:' ? 'wss:' : 'ws:';
+			const host = window.location.host;
+			const fullWsUrl = `${protocol}//${host}${ws_url}`;
+
+			this._ws = new WebSocket(fullWsUrl);
+
+			this._ws.onopen = () => resolve();
+			this._ws.onerror = () => reject(new Error('WebSocket connection failed'));
+			this._ws.onclose = () => this.onclose?.();
+			this._ws.onmessage = (event) => {
+				try {
+					const message = JSON.parse(event.data);
+					this.onmessage?.(message);
+				} catch (err) {
+					this.onerror?.(err as Error);
+				}
+			};
+		});
+	}
+
+	async send(message: any): Promise<void> {
+		if (!this._ws || this._ws.readyState !== WebSocket.OPEN) {
+			throw new Error('Transport not connected');
+		}
+		this._ws.send(JSON.stringify(message));
+	}
+
+	async close(): Promise<void> {
+		this._ws?.close();
+		if (this._sessionId) {
+			await fetch(`/mcp/stdio/sessions/${this._sessionId}`, {
+				method: 'DELETE',
+				headers: getAuthHeaders()
+			}).catch(() => {});
+		}
+	}
+}
+
 export class MCPService {
 	/**
 	 * Create a connection log entry for phase tracking.
@@ -361,6 +431,14 @@ export class MCPService {
 		type: MCPTransportType;
 		stopPhaseLogging: () => void;
 	} {
+		if (config.transport === MCPTransportType.STDIO) {
+			return {
+				transport: new LlamaServerStdioTransport(serverName, config),
+				type: MCPTransportType.STDIO,
+				stopPhaseLogging: () => {}
+			};
+		}
+
 		if (!config.url) {
 			throw new Error('MCP server configuration is missing url');
 		}
@@ -384,6 +462,7 @@ export class MCPService {
 		}
 
 		if (config.transport === MCPTransportType.WEBSOCKET) {
+			if (!config.url) throw new Error('WebSocket URL is missing');
 			if (useProxy) {
 				throw new Error(
 					'WebSocket transport is not supported when using CORS proxy. Use HTTP transport instead.'

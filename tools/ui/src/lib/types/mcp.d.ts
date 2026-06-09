@@ -181,7 +181,7 @@ export interface HealthCheckParams {
 
 export type MCPServerConfig = {
 	transport?: MCPTransportType;
-	url: string;
+	url?: string;
 	protocols?: string | string[];
 	headers?: Record<string, string>;
 	credentials?: RequestCredentials;
@@ -189,6 +189,10 @@ export type MCPServerConfig = {
 	requestTimeoutMs?: number;
 	capabilities?: ClientCapabilities;
 	useProxy?: boolean;
+	command?: string;
+	args?: string[];
+	cwd?: string;
+	env?: Record<string, string>;
 };
 
 export type MCPClientConfig = {
@@ -212,12 +216,17 @@ export type MCPToolCall = {
 export type MCPServerSettingsEntry = {
 	id: string;
 	enabled: boolean;
-	url: string;
+	url?: string;
 	requestTimeoutSeconds: number;
 	headers?: string;
 	name?: string;
 	iconUrl?: string;
 	useProxy?: boolean;
+	transport?: MCPTransportType;
+	command?: string;
+	args?: string[];
+	cwd?: string;
+	env?: string;
 };
 
 export interface MCPHostManagerConfig {

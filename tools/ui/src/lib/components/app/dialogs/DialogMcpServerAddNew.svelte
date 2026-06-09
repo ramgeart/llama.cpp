@@ -14,9 +14,18 @@
 
 	let { open = $bindable(), onOpenChange }: Props = $props();
 
+	import { MCPTransportType } from '$lib/enums';
+
 	let newServerUrl = $state('');
 	let newServerHeaders = $state('');
+	let newServerTransport = $state(MCPTransportType.STREAMABLE_HTTP);
+	let newServerCommand = $state('');
+	let newServerArgs = $state<string[]>([]);
+	let newServerCwd = $state('');
+	let newServerEnv = $state('');
+
 	let newServerUrlError = $derived.by(() => {
+		if (newServerTransport === MCPTransportType.STDIO) return null;
 		if (!newServerUrl.trim()) return 'URL is required';
 		try {
 			new URL(newServerUrl);
@@ -27,25 +36,40 @@
 		}
 	});
 
+	let canSave = $derived(
+		!newServerUrlError &&
+			(newServerTransport !== MCPTransportType.STDIO || newServerCommand.trim())
+	);
+
 	function handleOpenChange(value: boolean) {
 		if (!value) {
 			newServerUrl = '';
 			newServerHeaders = '';
+			newServerTransport = MCPTransportType.STREAMABLE_HTTP;
+			newServerCommand = '';
+			newServerArgs = [];
+			newServerCwd = '';
+			newServerEnv = '';
 		}
 		open = value;
 		onOpenChange?.(value);
 	}
 
 	function saveNewServer() {
-		if (newServerUrlError) return;
+		if (!canSave) return;
 
 		const newServerId = uuid() ?? `${MCP_SERVER_ID_PREFIX}-${Date.now()}`;
 
 		mcpStore.addServer({
 			id: newServerId,
 			enabled: true,
-			url: newServerUrl.trim(),
-			headers: newServerHeaders.trim() || undefined
+			url: newServerTransport === MCPTransportType.STDIO ? undefined : newServerUrl.trim(),
+			headers: newServerHeaders.trim() || undefined,
+			transport: newServerTransport,
+			command: newServerCommand.trim() || undefined,
+			args: newServerArgs.length > 0 ? newServerArgs : undefined,
+			cwd: newServerCwd.trim() || undefined,
+			env: newServerEnv.trim() || undefined
 		});
 
 		conversationsStore.setMcpServerOverride(newServerId, true);
@@ -64,8 +88,18 @@
 			<McpServerForm
 				url={newServerUrl}
 				headers={newServerHeaders}
+				transport={newServerTransport}
+				command={newServerCommand}
+				args={newServerArgs}
+				cwd={newServerCwd}
+				env={newServerEnv}
 				onUrlChange={(v) => (newServerUrl = v)}
 				onHeadersChange={(v) => (newServerHeaders = v)}
+				onTransportChange={(v) => (newServerTransport = v)}
+				onCommandChange={(v) => (newServerCommand = v)}
+				onArgsChange={(v) => (newServerArgs = v)}
+				onCwdChange={(v) => (newServerCwd = v)}
+				onEnvChange={(v) => (newServerEnv = v)}
 				urlError={newServerUrl ? newServerUrlError : null}
 				id="new-server"
 			/>
@@ -78,7 +112,7 @@
 				variant="default"
 				size="sm"
 				onclick={saveNewServer}
-				disabled={!!newServerUrlError}
+				disabled={!canSave}
 				aria-label="Save"
 			>
 				Add

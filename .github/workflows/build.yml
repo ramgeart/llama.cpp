@@ -1,0 +1,133 @@
+name: Build
+
+on:
+  workflow_dispatch:
+
+jobs:
+  build:
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          - name: cudalinux
+            os: ubuntu-latest
+            platform: linux
+            cuda: true
+
+          - name: cudawin
+            os: windows-latest
+            platform: windows
+            cuda: true
+
+          - name: nocudalinux
+            os: ubuntu-latest
+            platform: linux
+            cuda: false
+
+          - name: nocudawin
+            os: windows-latest
+            platform: windows
+            cuda: false
+
+    runs-on: ${{ matrix.os }}
+
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Parse compile flags
+        shell: bash
+        run: python scripts/parse_compile_flags.py --target "${{ matrix.name }}" --github-env "$GITHUB_ENV"
+
+      - name: Skip disabled target
+        if: env.TARGET_COMPILE == 'false'
+        run: echo "Skipping ${{ matrix.name }} because TARGET_COMPILE=false"
+
+      - name: Install Linux dependencies
+        if: env.TARGET_COMPILE == 'true' && matrix.platform == 'linux'
+        run: |
+          sudo apt-get update
+          sudo apt-get install -y ${{ env.LINUX_APT_PACKAGES }}
+
+      - name: Install Windows dependencies
+        if: env.TARGET_COMPILE == 'true' && matrix.platform == 'windows'
+        run: choco install ${{ env.WINDOWS_CHOCO_PACKAGES }}
+
+      - name: Install CUDA
+        if: env.TARGET_COMPILE == 'true' && matrix.cuda == true
+        uses: Jimver/cuda-toolkit@v0.2.21
+        with:
+          cuda: ${{ env.CUDA_VERSION }}
+
+      - name: Verify CUDA
+        if: env.TARGET_COMPILE == 'true' && matrix.cuda == true
+        run: nvcc --version
+
+      - name: Configure CMake (Linux)
+        if: env.TARGET_COMPILE == 'true' && matrix.platform == 'linux'
+        run: >
+          cmake -S . -B "${{ env.BUILD_DIR }}"
+          -G "${{ env.LINUX_GENERATOR }}"
+          -DCMAKE_BUILD_TYPE="${{ env.BUILD_TYPE }}"
+          ${{ env.COMMON_CMAKE_OPTIONS }}
+          ${{ env.BACKEND_CMAKE_OPTIONS }}
+
+      - name: Configure CMake (Windows)
+        if: env.TARGET_COMPILE == 'true' && matrix.platform == 'windows'
+        shell: pwsh
+        run: >
+          cmake -S . -B "$env:BUILD_DIR"
+          -G "$env:WINDOWS_GENERATOR"
+          -DCMAKE_BUILD_TYPE="$env:BUILD_TYPE"
+          $env:COMMON_CMAKE_OPTIONS
+          $env:BACKEND_CMAKE_OPTIONS
+
+      - name: Build (Linux)
+        if: env.TARGET_COMPILE == 'true' && matrix.platform == 'linux'
+        run: |
+          if [ "${{ env.BUILD_JOBS }}" = "auto" ]; then
+            JOBS=$(nproc)
+          else
+            JOBS=${{ env.BUILD_JOBS }}
+          fi
+          cmake --build "${{ env.BUILD_DIR }}" --target ${{ env.BUILD_TARGETS }} --parallel $JOBS
+
+      - name: Build (Windows)
+        if: env.TARGET_COMPILE == 'true' && matrix.platform == 'windows'
+        shell: pwsh
+        run: |
+          if ("$env:BUILD_JOBS" -eq "auto") {
+            $JOBS = $env:NUMBER_OF_PROCESSORS
+          } else {
+            $JOBS = $env:BUILD_JOBS
+          }
+          cmake --build "$env:BUILD_DIR" --target $env:BUILD_TARGETS --parallel $JOBS
+
+      - name: Test (Linux)
+        if: env.TARGET_COMPILE == 'true' && matrix.platform == 'linux' && env.RUN_TESTS == 'true'
+        run: ${{ env.LINUX_TEST_COMMAND }}
+
+      - name: Test (Windows)
+        if: env.TARGET_COMPILE == 'true' && matrix.platform == 'windows' && env.RUN_TESTS == 'true'
+        shell: pwsh
+        run: Invoke-Expression $env:WINDOWS_TEST_COMMAND
+
+      - name: Upload artifact (Linux)
+        if: env.TARGET_COMPILE == 'true' && matrix.platform == 'linux'
+        uses: actions/upload-artifact@v4
+        with:
+          name: ${{ env.ARTIFACT_PREFIX }}-${{ matrix.name }}
+          path: |
+            ${{ env.BUILD_DIR }}/bin/llama-server
+            ${{ env.BUILD_DIR }}/bin/*.so
+
+      - name: Upload artifact (Windows)
+        if: env.TARGET_COMPILE == 'true' && matrix.platform == 'windows'
+        uses: actions/upload-artifact@v4
+        with:
+          name: ${{ env.ARTIFACT_PREFIX }}-${{ matrix.name }}
+          path: |
+            ${{ env.BUILD_DIR }}/bin/llama-server.exe
+            ${{ env.BUILD_DIR }}/bin/Release/llama-server.exe
+            ${{ env.BUILD_DIR }}/bin/*.dll
+            ${{ env.BUILD_DIR }}/bin/Release/*.dll
