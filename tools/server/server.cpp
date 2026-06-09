@@ -221,15 +221,15 @@ int llama_server(int argc, char ** argv) {
     ctx_http.post("/slots/:id_slot",           ex_wrapper(routes.post_slots));
 
     // MCP stdio
-    ctx_http.get("/mcp/stdio/enabled", [&](const server_http_req &) {
+    ctx_http.get("/mcp/stdio/enabled", ex_wrapper([&](const server_http_req &) {
         auto res = std::make_unique<server_http_res>();
         res->data = safe_json_to_str({{"enabled", params.ui_mcp_stdio}});
         return res;
-    });
+    }));
 
-    ctx_http.post("/mcp/stdio/session", [&](const server_http_req & req) {
-        auto res = std::make_unique<server_http_res>();
+    ctx_http.post("/mcp/stdio/session", ex_wrapper([&](const server_http_req & req) {
         if (!params.ui_mcp_stdio) {
+            auto res = std::make_unique<server_http_res>();
             res->status = 403;
             res->data = safe_json_to_str({{"error", format_error_response("MCP stdio is disabled", ERROR_TYPE_PERMISSION)}});
             return res;
@@ -238,6 +238,7 @@ int llama_server(int argc, char ** argv) {
         json body = json::parse(req.body);
         std::string server_id = json_value(body, "server_id", std::string());
         if (server_id.empty()) {
+            auto res = std::make_unique<server_http_res>();
             res->status = 400;
             res->data = safe_json_to_str({{"error", format_error_response("server_id is required", ERROR_TYPE_INVALID_REQUEST)}});
             return res;
@@ -245,6 +246,7 @@ int llama_server(int argc, char ** argv) {
 
         // validation: [a-zA-Z0-9_-], max 64, no path semantics
         if (server_id.length() > 64 || server_id.find_first_not_of("abcdefghijklmnopqrstuvwxyzABCDEFGHIJKLMNOPQRSTUVWXYZ0123456789_-") != std::string::npos) {
+            auto res = std::make_unique<server_http_res>();
             res->status = 400;
             res->data = safe_json_to_str({{"error", format_error_response("invalid server_id format", ERROR_TYPE_INVALID_REQUEST)}});
             return res;
@@ -258,6 +260,7 @@ int llama_server(int argc, char ** argv) {
         config.env = json_value(body, "env", std::map<std::string, std::string>());
 
         if (config.command.empty()) {
+            auto res = std::make_unique<server_http_res>();
             res->status = 400;
             res->data = safe_json_to_str({{"error", format_error_response("command is required", ERROR_TYPE_INVALID_REQUEST)}});
             return res;
@@ -265,18 +268,20 @@ int llama_server(int argc, char ** argv) {
 
         auto session = mcp_stdio.create_session(config);
         if (!session) {
+            auto res = std::make_unique<server_http_res>();
             res->status = 500;
             res->data = safe_json_to_str({{"error", format_error_response("failed to create MCP session", ERROR_TYPE_SERVER)}});
             return res;
         }
 
+        auto res = std::make_unique<server_http_res>();
         res->data = safe_json_to_str(json {
             {"session_id", session->session_id},
             {"server_id", session->server_id},
             {"ws_url", "/mcp/stdio/ws/" + session->session_id}
         });
         return res;
-    });
+    }));
 
     ctx_http.ws("/mcp/stdio/ws/:session_id", [&](const server_http_req & req, void * ws) {
         std::string session_id = req.get_param("session_id");
@@ -286,13 +291,16 @@ int llama_server(int argc, char ** argv) {
             return;
         }
 
-        session->on_stdout = [ws, &ctx_http](const std::string & line) {
-            ctx_http.ws_write(ws, line);
-        };
+        {
+            std::lock_guard<std::mutex> lock(session->callback_mutex);
+            session->on_stdout = [ws, &ctx_http](const std::string & line) {
+                ctx_http.ws_write(ws, line);
+            };
 
-        session->on_exit = [ws, &ctx_http]() {
-            ctx_http.ws_close(ws);
-        };
+            session->on_exit = [ws, &ctx_http]() {
+                ctx_http.ws_close(ws);
+            };
+        }
 
         auto * websocket = static_cast<httplib::ws::WebSocket *>(ws);
         // httplib::ws::WebSocket has no on_message in this version, we must read in a loop
@@ -316,34 +324,41 @@ int llama_server(int argc, char ** argv) {
         if (reader_thread.joinable()) {
             reader_thread.join();
         }
+
+        {
+            std::lock_guard<std::mutex> lock(session->callback_mutex);
+            session->on_stdout = nullptr;
+            session->on_exit = nullptr;
+        }
     });
 
-    ctx_http.get("/mcp/stdio/sessions/:session_id/diagnostics", [&](const server_http_req & req) {
+    ctx_http.get("/mcp/stdio/sessions/:session_id/diagnostics", ex_wrapper([&](const server_http_req & req) {
         std::string session_id = req.get_param("session_id");
         auto session = mcp_stdio.get_session(session_id);
-        auto res = std::make_unique<server_http_res>();
         if (!session) {
+            auto res = std::make_unique<server_http_res>();
             res->status = 404;
             res->data = safe_json_to_str({{"error", format_error_response("session not found", ERROR_TYPE_NOT_FOUND)}});
             return res;
         }
+        auto res = std::make_unique<server_http_res>();
         res->data = safe_json_to_str(session->get_diagnostics());
         return res;
-    });
+    }));
 
-    ctx_http.get("/mcp/stdio/sessions", [&](const server_http_req &) {
+    ctx_http.get("/mcp/stdio/sessions", ex_wrapper([&](const server_http_req &) {
         auto res = std::make_unique<server_http_res>();
         res->data = safe_json_to_str(mcp_stdio.get_all_sessions());
         return res;
-    });
+    }));
 
-    ctx_http.del("/mcp/stdio/sessions/:session_id", [&](const server_http_req & req) {
+    ctx_http.del("/mcp/stdio/sessions/:session_id", ex_wrapper([&](const server_http_req & req) {
         std::string session_id = req.get_param("session_id");
         mcp_stdio.delete_session(session_id);
         auto res = std::make_unique<server_http_res>();
         res->data = safe_json_to_str({{"success", true}});
         return res;
-    });
+    }));
 
     // Google Cloud Platform (Vertex AI) compat
     ctx_http.register_gcp_compat();
@@ -455,6 +470,13 @@ int llama_server(int argc, char ** argv) {
     sigint_action.sa_flags = 0;
     sigaction(SIGINT, &sigint_action, NULL);
     sigaction(SIGTERM, &sigint_action, NULL);
+
+    // Ignore SIGPIPE to prevent crashing on broken pipes (stdio MCP)
+    struct sigaction sigpipe_action;
+    sigpipe_action.sa_handler = SIG_IGN;
+    sigemptyset(&sigpipe_action.sa_mask);
+    sigpipe_action.sa_flags = 0;
+    sigaction(SIGPIPE, &sigpipe_action, NULL);
 #elif defined (_WIN32)
     auto console_ctrl_handler = +[](DWORD ctrl_type) -> BOOL {
         return (ctrl_type == CTRL_C_EVENT) ? (signal_handler(SIGINT), true) : false;

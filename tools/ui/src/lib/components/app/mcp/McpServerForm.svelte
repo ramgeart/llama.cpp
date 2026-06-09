@@ -54,6 +54,46 @@
 		id = 'server'
 	}: Props = $props();
 
+	let argsString = $state(JSON.stringify(args));
+	let envString = $state(env);
+
+	let argsError = $state<string | null>(null);
+	let envError = $state<string | null>(null);
+
+	$effect(() => {
+		argsString = JSON.stringify(args);
+	});
+
+	$effect(() => {
+		envString = env;
+	});
+
+	function handleArgsBlur() {
+		try {
+			const parsed = JSON.parse(argsString);
+			if (Array.isArray(parsed)) {
+				onArgsChange?.(parsed);
+				argsError = null;
+			} else {
+				argsError = 'Arguments must be a JSON array';
+			}
+		} catch (e) {
+			argsError = 'Invalid JSON array';
+		}
+	}
+
+	function handleEnvBlur() {
+		try {
+			if (envString.trim()) {
+				JSON.parse(envString);
+			}
+			onEnvChange?.(envString);
+			envError = null;
+		} catch (e) {
+			envError = 'Invalid JSON object';
+		}
+	}
+
 	let isWebSocket = $derived(
 		url.toLowerCase().startsWith(UrlProtocol.WEBSOCKET) ||
 			url.toLowerCase().startsWith(UrlProtocol.WEBSOCKET_SECURE)
@@ -182,16 +222,13 @@
 					<Input
 						id="server-args-{id}"
 						placeholder='e.g. ["server.js"]'
-						value={JSON.stringify(args)}
-						oninput={(e) => {
-							try {
-								const parsed = JSON.parse(e.currentTarget.value);
-								if (Array.isArray(parsed)) onArgsChange?.(parsed);
-							} catch {
-								/* ignore invalid json */
-							}
-						}}
+						bind:value={argsString}
+						onblur={handleArgsBlur}
+						class={argsError ? 'border-destructive' : ''}
 					/>
+					{#if argsError}
+						<p class="mt-1.5 text-xs text-destructive">{argsError}</p>
+					{/if}
 				</div>
 
 				<div>
@@ -211,9 +248,13 @@
 					<Input
 						id="server-env-{id}"
 						placeholder="e.g. &#123;&quot;KEY&quot;: &quot;VALUE&quot;&#125;"
-						value={env}
-						oninput={(e) => onEnvChange?.(e.currentTarget.value)}
+						bind:value={envString}
+						onblur={handleEnvBlur}
+						class={envError ? 'border-destructive' : ''}
 					/>
+					{#if envError}
+						<p class="mt-1.5 text-xs text-destructive">{envError}</p>
+					{/if}
 				</div>
 			</div>
 		{/if}

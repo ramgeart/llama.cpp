@@ -34,6 +34,41 @@ static std::wstring utf8_to_wide(const std::string & str) {
     MultiByteToWideChar(CP_UTF8, 0, &str[0], (int)str.size(), &wstrTo[0], size_needed);
     return wstrTo;
 }
+
+static std::wstring windows_argv_to_command_line(const std::string & command, const std::vector<std::string> & args) {
+    auto quote_arg = [](const std::string & arg) {
+        if (arg.empty()) return std::wstring(L"\"\"");
+        if (arg.find_first_of(" \t\n\v\"") == std::string::npos) return utf8_to_wide(arg);
+
+        std::wstring res = L"\"";
+        for (size_t i = 0; i < arg.size(); ++i) {
+            size_t backslashes = 0;
+            while (i < arg.size() && arg[i] == '\\') {
+                i++;
+                backslashes++;
+            }
+
+            if (i == arg.size()) {
+                res.append(backslashes * 2, L'\\');
+                break;
+            } else if (arg[i] == '\"') {
+                res.append(backslashes * 2 + 1, L'\\');
+                res.append(1, L'\"');
+            } else {
+                res.append(backslashes, L'\\');
+                res.append(1, (wchar_t)arg[i]); // Assuming ASCII-compatible chars in the string
+            }
+        }
+        res.append(L"\"");
+        return res;
+    };
+
+    std::wstring cmd_line = quote_arg(command);
+    for (const auto & arg : args) {
+        cmd_line += L" " + quote_arg(arg);
+    }
+    return cmd_line;
+}
 #endif
 
 bool mcp_stdio_session::start(const mcp_stdio_config & config) {
@@ -68,21 +103,7 @@ bool mcp_stdio_session::start(const mcp_stdio_config & config) {
     }
 
     // Prepare Command Line
-    std::wstring wcmd = utf8_to_wide(config.command);
-    std::wstring wargs = L"";
-    for (const auto & arg : config.args) {
-        wargs += L" " + utf8_to_wide(arg); // Simplistic, should really escape
-    }
-    std::wstring wfull_cmd = utf8_to_wide(config.command);
-    for (const auto & arg : config.args) {
-        wfull_cmd += L" ";
-        // Basic escaping for spaces
-        if (arg.find(' ') != std::string::npos) {
-            wfull_cmd += L"\"" + utf8_to_wide(arg) + L"\"";
-        } else {
-            wfull_cmd += utf8_to_wide(arg);
-        }
-    }
+    std::wstring wfull_cmd = windows_argv_to_command_line(config.command, config.args);
 
     STARTUPINFOW siStartInfo;
     ZeroMemory(&siStartInfo, sizeof(STARTUPINFOW));
@@ -221,12 +242,22 @@ void mcp_stdio_session::terminate() {
     if (pid > 0) {
         kill(-pid, SIGTERM);
         // Wait briefly then SIGKILL
-        std::thread([p = pid]() {
+        std::thread([this, p = pid]() {
             std::this_thread::sleep_for(std::chrono::milliseconds(500));
-            kill(-p, SIGKILL);
-            int status;
-            waitpid(p, &status, 0);
+            if (!process_reaped) {
+                kill(-p, SIGKILL);
+            }
         }).detach();
+
+        if (!process_reaped.exchange(true)) {
+            int status;
+            waitpid(pid, &status, 0);
+            if (WIFEXITED(status)) {
+                exit_code = WEXITSTATUS(status);
+            } else {
+                exit_code = 1;
+            }
+        }
         pid = -1;
     }
     if (fd_stdin != -1) { close(fd_stdin); fd_stdin = -1; }
@@ -249,6 +280,7 @@ bool mcp_stdio_session::write_stdin(const std::string & data) {
 void mcp_stdio_session::capture_stdout() {
     char buffer[4096];
     std::string leftover;
+    const size_t max_leftover = 1024 * 1024; // 1MB limit for very long lines
     while (true) {
 #ifdef _WIN32
         DWORD bytesRead;
@@ -259,22 +291,46 @@ void mcp_stdio_session::capture_stdout() {
         if (bytesRead <= 0) break;
         std::string chunk(buffer, bytesRead);
 #endif
+        if (leftover.size() + chunk.size() > max_leftover) {
+            leftover.clear(); // Drop very long lines that exceed the buffer
+            bytes_truncated = true;
+        }
         leftover += chunk;
         size_t pos;
         while ((pos = leftover.find('\n')) != std::string::npos) {
             std::string line = leftover.substr(0, pos);
             if (!line.empty() && line.back() == '\r') line.pop_back();
-            if (on_stdout) on_stdout(line);
+            {
+                std::lock_guard<std::mutex> lock(callback_mutex);
+                if (on_stdout) on_stdout(line);
+            }
             leftover.erase(0, pos + 1);
         }
     }
     process_exited = true;
-    if (on_exit) on_exit();
+
+#ifndef _WIN32
+    if (pid > 0 && !process_reaped.exchange(true)) {
+        int status;
+        waitpid(pid, &status, 0);
+        if (WIFEXITED(status)) {
+            exit_code = WEXITSTATUS(status);
+        } else {
+            exit_code = 1;
+        }
+    }
+#endif
+
+    {
+        std::lock_guard<std::mutex> lock(callback_mutex);
+        if (on_exit) on_exit();
+    }
 }
 
 void mcp_stdio_session::capture_stderr() {
     char buffer[4096];
     std::string leftover;
+    const size_t max_leftover = 1024 * 1024; // 1MB limit
     while (true) {
 #ifdef _WIN32
         DWORD bytesRead;
@@ -285,6 +341,10 @@ void mcp_stdio_session::capture_stderr() {
         if (bytesRead <= 0) break;
         std::string chunk(buffer, bytesRead);
 #endif
+        if (leftover.size() + chunk.size() > max_leftover) {
+            leftover.clear();
+            bytes_truncated = true;
+        }
         leftover += chunk;
         size_t pos;
         while ((pos = leftover.find('\n')) != std::string::npos) {

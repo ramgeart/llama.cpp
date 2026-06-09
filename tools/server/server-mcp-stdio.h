@@ -24,12 +24,15 @@ struct mcp_stdio_session {
 
     std::atomic<bool> process_started{false};
     std::atomic<bool> process_exited{false};
+    std::atomic<bool> process_reaped{false};
     std::atomic<int> exit_code{0};
     std::string last_error;
 
     mutable std::mutex stderr_mutex;
     std::deque<std::string> stderr_tail;
     bool bytes_truncated = false;
+
+    mutable std::mutex callback_mutex;
 
 #ifdef _WIN32
     void * hProcess    = nullptr;
