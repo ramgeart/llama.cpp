@@ -35,15 +35,15 @@ static std::wstring utf8_to_wide(const std::string & str) {
     return wstrTo;
 }
 
-static std::wstring windows_argv_to_command_line(const std::string & command, const std::vector<std::string> & args) {
-    auto quote_arg = [](const std::string & arg) {
+static std::wstring windows_argv_to_command_line(const std::wstring & command, const std::vector<std::wstring> & args) {
+    auto quote_arg = [](const std::wstring & arg) {
         if (arg.empty()) return std::wstring(L"\"\"");
-        if (arg.find_first_of(" \t\n\v\"") == std::string::npos) return utf8_to_wide(arg);
+        if (arg.find_first_of(L" \t\n\v\"") == std::wstring::npos) return arg;
 
         std::wstring res = L"\"";
         for (size_t i = 0; i < arg.size(); ++i) {
             size_t backslashes = 0;
-            while (i < arg.size() && arg[i] == '\\') {
+            while (i < arg.size() && arg[i] == L'\\') {
                 i++;
                 backslashes++;
             }
@@ -51,12 +51,12 @@ static std::wstring windows_argv_to_command_line(const std::string & command, co
             if (i == arg.size()) {
                 res.append(backslashes * 2, L'\\');
                 break;
-            } else if (arg[i] == '\"') {
+            } else if (arg[i] == L'\"') {
                 res.append(backslashes * 2 + 1, L'\\');
                 res.append(1, L'\"');
             } else {
                 res.append(backslashes, L'\\');
-                res.append(1, (wchar_t)arg[i]); // Assuming ASCII-compatible chars in the string
+                res.append(1, arg[i]);
             }
         }
         res.append(L"\"");
@@ -103,7 +103,16 @@ bool mcp_stdio_session::start(const mcp_stdio_config & config) {
     }
 
     // Prepare Command Line
-    std::wstring wfull_cmd = windows_argv_to_command_line(config.command, config.args);
+    std::wstring wcommand = utf8_to_wide(config.command);
+    std::vector<std::wstring> wargs;
+    for (const auto & arg : config.args) {
+        wargs.push_back(utf8_to_wide(arg));
+    }
+    std::wstring wfull_cmd = windows_argv_to_command_line(wcommand, wargs);
+
+    // CreateProcessW requires a mutable buffer for the command line
+    std::vector<wchar_t> wcmd_buffer(wfull_cmd.begin(), wfull_cmd.end());
+    wcmd_buffer.push_back(L'\0');
 
     STARTUPINFOW siStartInfo;
     ZeroMemory(&siStartInfo, sizeof(STARTUPINFOW));
@@ -148,7 +157,7 @@ bool mcp_stdio_session::start(const mcp_stdio_config & config) {
 
     LPVOID lpEnvironment = env_block.empty() ? NULL : env_block.data();
 
-    if (!CreateProcessW(NULL, (LPWSTR)wfull_cmd.c_str(), NULL, NULL, TRUE, CREATE_NO_WINDOW | CREATE_SUSPENDED | CREATE_UNICODE_ENVIRONMENT, lpEnvironment, lpCurrentDirectory, &siStartInfo, &piProcInfo)) {
+    if (!CreateProcessW(NULL, wcmd_buffer.data(), NULL, NULL, TRUE, CREATE_NO_WINDOW | CREATE_SUSPENDED | CREATE_UNICODE_ENVIRONMENT, lpEnvironment, lpCurrentDirectory, &siStartInfo, &piProcInfo)) {
         last_error = "CreateProcessW failed: " + std::to_string(GetLastError());
         return false;
     }
@@ -240,23 +249,29 @@ void mcp_stdio_session::terminate() {
     if (hStderrRead) { CloseHandle(hStderrRead); hStderrRead = nullptr; }
 #else
     if (pid > 0) {
+        // Send SIGTERM to the entire process group
         kill(-pid, SIGTERM);
-        // Wait briefly then SIGKILL
-        std::thread([this, p = pid]() {
-            std::this_thread::sleep_for(std::chrono::milliseconds(500));
-            if (!process_reaped) {
-                kill(-p, SIGKILL);
-            }
-        }).detach();
 
-        if (!process_reaped.exchange(true)) {
-            int status;
-            waitpid(pid, &status, 0);
-            if (WIFEXITED(status)) {
-                exit_code = WEXITSTATUS(status);
-            } else {
-                exit_code = 1;
+        // Wait a bit for graceful exit
+        int status;
+        for (int i = 0; i < 5; ++i) {
+            if (waitpid(pid, &status, WNOHANG) != 0) {
+                process_reaped = true;
+                if (WIFEXITED(status)) {
+                    exit_code = WEXITSTATUS(status);
+                } else {
+                    exit_code = 1;
+                }
+                break;
             }
+            std::this_thread::sleep_for(std::chrono::milliseconds(100));
+        }
+
+        // If still alive, SIGKILL
+        if (!process_reaped.exchange(true)) {
+            kill(-pid, SIGKILL);
+            waitpid(pid, &status, 0);
+            exit_code = 1;
         }
         pid = -1;
     }
@@ -300,10 +315,14 @@ void mcp_stdio_session::capture_stdout() {
         while ((pos = leftover.find('\n')) != std::string::npos) {
             std::string line = leftover.substr(0, pos);
             if (!line.empty() && line.back() == '\r') line.pop_back();
+
+            std::function<void(const std::string &)> local_on_stdout;
             {
                 std::lock_guard<std::mutex> lock(callback_mutex);
-                if (on_stdout) on_stdout(line);
+                local_on_stdout = on_stdout;
             }
+            if (local_on_stdout) local_on_stdout(line);
+
             leftover.erase(0, pos + 1);
         }
     }
@@ -321,10 +340,12 @@ void mcp_stdio_session::capture_stdout() {
     }
 #endif
 
+    std::function<void()> local_on_exit;
     {
         std::lock_guard<std::mutex> lock(callback_mutex);
-        if (on_exit) on_exit();
+        local_on_exit = on_exit;
     }
+    if (local_on_exit) local_on_exit();
 }
 
 void mcp_stdio_session::capture_stderr() {

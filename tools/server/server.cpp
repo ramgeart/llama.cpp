@@ -330,6 +330,9 @@ int llama_server(int argc, char ** argv) {
             session->on_stdout = nullptr;
             session->on_exit = nullptr;
         }
+
+        // Guarantee session is deleted when WebSocket handler exits
+        mcp_stdio.delete_session(session_id);
     });
 
     ctx_http.get("/mcp/stdio/sessions/:session_id/diagnostics", ex_wrapper([&](const server_http_req & req) {
