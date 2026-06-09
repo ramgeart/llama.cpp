@@ -235,7 +235,15 @@ int llama_server(int argc, char ** argv) {
             return res;
         }
 
-        json body = json::parse(req.body);
+        json body;
+        try {
+            body = json::parse(req.body);
+        } catch (const json::parse_error &) {
+            auto res = std::make_unique<server_http_res>();
+            res->status = 400;
+            res->data = safe_json_to_str({{"error", format_error_response("invalid JSON in request body", ERROR_TYPE_INVALID_REQUEST)}});
+            return res;
+        }
         std::string server_id = json_value(body, "server_id", std::string());
         if (server_id.empty()) {
             auto res = std::make_unique<server_http_res>();

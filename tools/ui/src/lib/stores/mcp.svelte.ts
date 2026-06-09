@@ -30,7 +30,8 @@ import {
 	parseMcpServerSettings,
 	detectMcpTransportFromUrl,
 	uuid,
-	extractRootDomain
+	extractRootDomain,
+	getAuthHeaders
 } from '$lib/utils';
 import {
 	MCPConnectionPhase,
@@ -40,7 +41,8 @@ import {
 	ColorMode,
 	UrlProtocol,
 	JsonSchemaType,
-	ToolCallType
+	ToolCallType,
+	MCPTransportType
 } from '$lib/enums';
 import {
 	DEFAULT_CACHE_TTL_MS,
@@ -102,7 +104,7 @@ class MCPStore {
 	}
 
 	private checkStdioSupport() {
-		fetch('/mcp/stdio/enabled')
+		fetch('/mcp/stdio/enabled', { headers: getAuthHeaders() })
 			.then((r) => r.json())
 			.then((d) => (this._isStdioEnabled = d.enabled))
 			.catch(() => (this._isStdioEnabled = false));
@@ -199,7 +201,10 @@ class MCPStore {
 		let env: Record<string, string> | undefined;
 		if (entry.env) {
 			try {
-				env = JSON.parse(entry.env);
+				const parsed = JSON.parse(entry.env);
+				if (typeof parsed === 'object' && parsed !== null && !Array.isArray(parsed))
+					env = parsed as Record<string, string>;
+				else console.warn('[MCP] env must be a JSON object, ignoring:', entry.env);
 			} catch {
 				console.warn('[MCP] Failed to parse env JSON:', entry.env);
 			}
@@ -613,7 +618,7 @@ class MCPStore {
 		}
 
 		// Check if stdio is enabled on backend
-		fetch('/mcp/stdio/enabled')
+		fetch('/mcp/stdio/enabled', { headers: getAuthHeaders() })
 			.then((r) => r.json())
 			.then((d) => (this._isStdioEnabled = d.enabled))
 			.catch(() => (this._isStdioEnabled = false));

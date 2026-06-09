@@ -2929,7 +2929,7 @@ common_params_context common_params_parser_init(common_params & params, llama_ex
     add_opt(common_arg(
         {"--ui-mcp-stdio"},
         {"--no-ui-mcp-stdio"},
-        "whether to enable MCP stdio support (default: enabled)",
+        "whether to enable MCP stdio support - do not enable in untrusted environments (default: disabled)",
         [](common_params & params, bool value) {
             params.ui_mcp_stdio = value;
         }

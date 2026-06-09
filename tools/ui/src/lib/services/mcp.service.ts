@@ -5,7 +5,6 @@ import {
 } from '@modelcontextprotocol/sdk/client/streamableHttp.js';
 import { SSEClientTransport } from '@modelcontextprotocol/sdk/client/sse.js';
 import { WebSocketClientTransport } from '@modelcontextprotocol/sdk/client/websocket.js';
-import { JSONRPCMessageSchema } from '@modelcontextprotocol/sdk/types.js';
 import type {
 	Tool,
 	Prompt,
@@ -96,7 +95,7 @@ class LlamaServerStdioTransport implements Transport {
 	async start(): Promise<void> {
 		const response = await fetch('/mcp/stdio/session', {
 			method: 'POST',
-			headers: { 'Content-Type': 'application/json' },
+			headers: { 'Content-Type': 'application/json', ...getAuthHeaders() },
 			body: JSON.stringify({
 				server_id: this._serverId,
 				command: this._config.command,
@@ -145,7 +144,10 @@ class LlamaServerStdioTransport implements Transport {
 	async close(): Promise<void> {
 		this._ws?.close();
 		if (this._sessionId) {
-			await fetch(`/mcp/stdio/sessions/${this._sessionId}`, { method: 'DELETE' }).catch(() => {});
+			await fetch(`/mcp/stdio/sessions/${this._sessionId}`, {
+				method: 'DELETE',
+				headers: getAuthHeaders()
+			}).catch(() => {});
 		}
 	}
 }

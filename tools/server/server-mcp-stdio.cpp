@@ -85,14 +85,46 @@ bool mcp_stdio_session::start(const mcp_stdio_config & config) {
     HANDLE hStdoutWrite = NULL;
     HANDLE hStderrWrite = NULL;
 
-    if (!CreatePipe(&hStdinRead, &hStdinWrite, &saAttr, 0)) return false;
-    if (!SetHandleInformation(hStdinWrite, HANDLE_FLAG_INHERIT, 0)) return false;
+    auto cleanup_win_pipes = [&]() {
+        if (hStdinRead)    { CloseHandle(hStdinRead);    hStdinRead    = NULL; }
+        if (hStdinWrite)   { CloseHandle((HANDLE)hStdinWrite);   hStdinWrite   = nullptr; }
+        if (hStdoutRead)   { CloseHandle((HANDLE)hStdoutRead);   hStdoutRead   = nullptr; }
+        if (hStdoutWrite)  { CloseHandle(hStdoutWrite);  hStdoutWrite  = NULL; }
+        if (hStderrRead)   { CloseHandle((HANDLE)hStderrRead);   hStderrRead   = nullptr; }
+        if (hStderrWrite)  { CloseHandle(hStderrWrite);  hStderrWrite  = NULL; }
+    };
 
-    if (!CreatePipe(&hStdoutRead, &hStdoutWrite, &saAttr, 0)) return false;
-    if (!SetHandleInformation(hStdoutRead, HANDLE_FLAG_INHERIT, 0)) return false;
+    if (!CreatePipe(&hStdinRead, (PHANDLE)&hStdinWrite, &saAttr, 0)) {
+        last_error = "CreatePipe(stdin) failed: " + std::to_string(GetLastError());
+        return false;
+    }
+    if (!SetHandleInformation((HANDLE)hStdinWrite, HANDLE_FLAG_INHERIT, 0)) {
+        last_error = "SetHandleInformation(stdin) failed: " + std::to_string(GetLastError());
+        cleanup_win_pipes();
+        return false;
+    }
 
-    if (!CreatePipe(&hStderrRead, &hStderrWrite, &saAttr, 0)) return false;
-    if (!SetHandleInformation(hStderrRead, HANDLE_FLAG_INHERIT, 0)) return false;
+    if (!CreatePipe((PHANDLE)&hStdoutRead, &hStdoutWrite, &saAttr, 0)) {
+        last_error = "CreatePipe(stdout) failed: " + std::to_string(GetLastError());
+        cleanup_win_pipes();
+        return false;
+    }
+    if (!SetHandleInformation((HANDLE)hStdoutRead, HANDLE_FLAG_INHERIT, 0)) {
+        last_error = "SetHandleInformation(stdout) failed: " + std::to_string(GetLastError());
+        cleanup_win_pipes();
+        return false;
+    }
+
+    if (!CreatePipe((PHANDLE)&hStderrRead, &hStderrWrite, &saAttr, 0)) {
+        last_error = "CreatePipe(stderr) failed: " + std::to_string(GetLastError());
+        cleanup_win_pipes();
+        return false;
+    }
+    if (!SetHandleInformation((HANDLE)hStderrRead, HANDLE_FLAG_INHERIT, 0)) {
+        last_error = "SetHandleInformation(stderr) failed: " + std::to_string(GetLastError());
+        cleanup_win_pipes();
+        return false;
+    }
 
     // Job Object
     hJob = CreateJobObjectW(NULL, NULL);
@@ -159,6 +191,7 @@ bool mcp_stdio_session::start(const mcp_stdio_config & config) {
 
     if (!CreateProcessW(NULL, wcmd_buffer.data(), NULL, NULL, TRUE, CREATE_NO_WINDOW | CREATE_SUSPENDED | CREATE_UNICODE_ENVIRONMENT, lpEnvironment, lpCurrentDirectory, &siStartInfo, &piProcInfo)) {
         last_error = "CreateProcessW failed: " + std::to_string(GetLastError());
+        cleanup_win_pipes();
         return false;
     }
 
@@ -170,6 +203,7 @@ bool mcp_stdio_session::start(const mcp_stdio_config & config) {
             CloseHandle(hProcess);
             CloseHandle(piProcInfo.hThread);
             hProcess = nullptr;
+            cleanup_win_pipes();
             return false;
         }
     }
@@ -181,11 +215,33 @@ bool mcp_stdio_session::start(const mcp_stdio_config & config) {
     CloseHandle(hStderrWrite);
 
 #else
-    int pipe_stdin[2];
-    int pipe_stdout[2];
-    int pipe_stderr[2];
+    int pipe_stdin[2]  = {-1, -1};
+    int pipe_stdout[2] = {-1, -1};
+    int pipe_stderr[2] = {-1, -1};
 
-    if (pipe(pipe_stdin) != 0 || pipe(pipe_stdout) != 0 || pipe(pipe_stderr) != 0) return false;
+    auto cleanup_posix_pipes = [&]() {
+        if (pipe_stdin[0]  != -1) { close(pipe_stdin[0]);  pipe_stdin[0]  = -1; }
+        if (pipe_stdin[1]  != -1) { close(pipe_stdin[1]);  pipe_stdin[1]  = -1; }
+        if (pipe_stdout[0] != -1) { close(pipe_stdout[0]); pipe_stdout[0] = -1; }
+        if (pipe_stdout[1] != -1) { close(pipe_stdout[1]); pipe_stdout[1] = -1; }
+        if (pipe_stderr[0] != -1) { close(pipe_stderr[0]); pipe_stderr[0] = -1; }
+        if (pipe_stderr[1] != -1) { close(pipe_stderr[1]); pipe_stderr[1] = -1; }
+    };
+
+    if (pipe(pipe_stdin) != 0) {
+        last_error = "pipe(stdin) failed: errno " + std::to_string(errno);
+        return false;
+    }
+    if (pipe(pipe_stdout) != 0) {
+        last_error = "pipe(stdout) failed: errno " + std::to_string(errno);
+        cleanup_posix_pipes();
+        return false;
+    }
+    if (pipe(pipe_stderr) != 0) {
+        last_error = "pipe(stderr) failed: errno " + std::to_string(errno);
+        cleanup_posix_pipes();
+        return false;
+    }
 
     pid = fork();
     if (pid == 0) {
@@ -232,6 +288,8 @@ bool mcp_stdio_session::start(const mcp_stdio_config & config) {
         close(pipe_stdout[1]);
         close(pipe_stderr[1]);
     } else {
+        last_error = "fork() failed: errno " + std::to_string(errno);
+        cleanup_posix_pipes();
         return false;
     }
 #endif

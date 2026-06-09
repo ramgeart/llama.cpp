@@ -85,7 +85,11 @@
 	function handleEnvBlur() {
 		try {
 			if (envString.trim()) {
-				JSON.parse(envString);
+				const parsed = JSON.parse(envString);
+				if (typeof parsed !== 'object' || parsed === null || Array.isArray(parsed)) {
+					envError = 'Must be a JSON object (e.g. {"KEY": "value"})';
+					return;
+				}
 			}
 			onEnvChange?.(envString);
 			envError = null;

@@ -78,7 +78,7 @@ export function parseMcpServerSettings(rawServers: unknown): MCPServerSettingsEn
 
 	return parsed.map((entry, index) => {
 		const typedEntry = entry as Partial<MCPServerSettingsEntry>;
-		const url = typeof typedEntry.url === 'string' ? typedEntry.url.trim() : undefined;
+		const url = typeof typedEntry.url === 'string' ? typedEntry.url.trim() : '';
 		const headers = typeof typedEntry.headers === 'string' ? typedEntry.headers.trim() : undefined;
 		const id =
 			typeof typedEntry.id === 'string' && typedEntry.id?.trim()
